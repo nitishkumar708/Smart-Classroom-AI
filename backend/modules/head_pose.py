@@ -10,45 +10,24 @@ import numpy as np
 logger = logging.getLogger("smart_classroom.head_pose")
  
 # ---------------------------------------------------------------------------
-# NOTE ON THIS MODEL — 2026-08 diagnostic pass
-#
-# The Y-components below are negated relative to the original values. This
-# is a TESTED HYPOTHESIS, not a confirmed fix as of this revision.
-#
-# Diagnostic evidence that motivated the change (see project notes):
-#   - Straight-facing pose consistently reported roll ~ +/-177-179 deg
-#     instead of ~0 deg, and roll stayed pinned near that value across
-#     every test regardless of physical motion (straight/tilt/turn).
-#   - Real ~20-30 deg tilts (roll) and ~20-25 deg turns (yaw) both showed
-#     up almost entirely as swings in the *pitch* output instead, while
-#     the yaw output stayed within +/-9 deg of baseline in every test.
-#   - That signature (fixed near-180 deg offset on one axis + real motion
-#     leaking into a different axis) is consistent with the 3D model
-#     points and the 2D image-landmark points using mismatched Y-axis
-#     conventions (image coordinates are Y-down; the original model
-#     values assumed Y-up), which distorts solvePnP's rotation solution
-#     without necessarily hurting reprojection error / confidence.
-#
-# This must be re-validated with the same five-test protocol (straight,
-# left ~20 deg, right ~20 deg, tilt-left ~20-30 deg, tilt-right ~20-30 deg)
-# before being treated as resolved. If yaw still fails to track left/right
-# turns after this change, the next suspects are _LANDMARK_INDICES
-# correspondence and/or _rotation_matrix_to_euler's axis assignment —
-# NOT the confidence/threshold values, which were deliberately left
-# untouched throughout this diagnostic pass.
+# 3D face model, in OpenCV camera convention: X = right, Y = DOWN, Z = away
+# from the camera (right-handed). So the nose is closest to the camera and
+# the eyes/mouth/chin are slightly FARTHER (positive Z). The earlier version
+# had negative Z, which is a mirrored model and gave nonsense angles
+# (roll ~180 deg and yaw/pitch mixed up).
 # ---------------------------------------------------------------------------
 _MODEL_POINTS_3D = np.array(
     [
-        (0.0, 0.0, 0.0),           # Nose tip
-        (0.0, 330.0, -65.0),       # Chin
-        (-225.0, -170.0, -135.0),  # Left eye left corner
-        (225.0, -170.0, -135.0),   # Right eye right corner
-        (-150.0, 150.0, -125.0),   # Left mouth corner
-        (150.0, 150.0, -125.0),    # Right mouth corner
+        (0.0, 0.0, 0.0),          # Nose tip
+        (0.0, 330.0, 65.0),       # Chin
+        (-225.0, -170.0, 135.0),  # Eye corner (image-left, landmark 33)
+        (225.0, -170.0, 135.0),   # Eye corner (image-right, landmark 263)
+        (-150.0, 150.0, 125.0),   # Mouth corner (image-left, landmark 61)
+        (150.0, 150.0, 125.0),    # Mouth corner (image-right, landmark 291)
     ],
     dtype=np.float64,
 )
- 
+
 # Corresponding indices into the 468-point MediaPipe FaceMesh landmark array
 _LANDMARK_INDICES = {
     "nose_tip": 1,
@@ -257,19 +236,18 @@ class HeadPoseEstimator:
  
     @staticmethod
     def _rotation_matrix_to_euler(R: np.ndarray) -> Tuple[float, float, float]:
-        """Convert a 3x3 rotation matrix to yaw/pitch/roll in degrees."""
-        sy = np.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
-        singular = sy < 1e-6
- 
-        if not singular:
-            pitch = np.arctan2(-R[2, 0], sy)
-            yaw = np.arctan2(R[1, 0], R[0, 0])
-            roll = np.arctan2(R[2, 1], R[2, 2])
+        """Return (yaw, pitch, roll) in degrees for a head in camera frame.
+        yaw   = turning left/right (rotation about the vertical Y axis)
+        pitch = nodding up/down    (rotation about the horizontal X axis)
+        roll  = tilting the head   (rotation about the Z axis)
+        Frontal face -> all three close to 0."""
+        yaw = np.arcsin(np.clip(-R[2, 0], -1.0, 1.0))
+        cy = np.cos(yaw)
+        if cy > 1e-6:
+            pitch = np.arctan2(R[2, 1], R[2, 2])
+            roll = np.arctan2(R[1, 0], R[0, 0])
         else:
-            pitch = np.arctan2(-R[2, 0], sy)
-            yaw = 0.0
-            roll = np.arctan2(-R[1, 2], R[1, 1])
- 
+            pitch = np.arctan2(-R[1, 2], R[1, 1])
+            roll = 0.0
         to_deg = 180.0 / np.pi
-        return yaw * to_deg, pitch * to_deg, roll * to_deg
- 
+        return float(yaw * to_deg), float(pitch * to_deg), float(roll * to_deg)

@@ -124,7 +124,7 @@ pytest backend/tests -v
 Stated openly so the results can be judged fairly:
 
 - **Attention score is a heuristic, not a trained model.** Thresholds were tuned by hand with one webcam in lab conditions and need re-calibration for a real classroom (camera angle, lighting, distance).
-- **Head-pose estimation is the weakest signal.** The 3D face model used with `solvePnP` was found to give unreliable yaw/pitch in some poses, so scores for "looking away" can be inaccurate.
+- **Head-pose estimation was corrected late in the project.** An inverted 3D face model used with `solvePnP` gave wrong yaw/pitch; after fixing it, attention scores behaved much better in webcam tests. It has only been checked on one person at normal webcam distance, not on a full classroom with varied angles.
 - **Emotion recognition is not implemented**, and is not part of the score.
 - **No authentication.** `/api/users` is plain CRUD, not a login system; do not expose this publicly as-is.
 - **Firebase free tier:** the dashboard polls frequently; the free daily read quota (50k) can be exhausted. Use the "run without Firebase" command for demos, or reduce polling.
@@ -134,7 +134,7 @@ Stated openly so the results can be judged fairly:
 
 ## Future work
 
-- Fix head-pose model and re-calibrate attention thresholds on recorded classroom data
+- Validate head pose and re-calibrate attention thresholds on recorded classroom data
 - Add authentication (JWT) and role-based access
 - Cache/aggregate Firestore reads to stay inside the free tier
 - Add a token to the ESP32 → backend request
